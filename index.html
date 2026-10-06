@@ -6,6 +6,8 @@
 <title>TradeLog — Journal del Trader</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- SDK de Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
     --bg-primary: #0D1117;
@@ -183,7 +185,6 @@
   <!-- PESTAÑA 2: RENDIMIENTO -->
   <div id="tab-stats" class="tab-content">
     <div class="dashboard-grid">
-      <!-- Grupo 1: Capital -->
       <div class="stat-group">
         <div class="stat-card">
           <button class="edit-capital-btn" onclick="configurarCapital()">Editar</button>
@@ -196,7 +197,6 @@
         </div>
       </div>
       
-      <!-- Grupo 2: Rentabilidades % -->
       <div class="stat-group">
         <div class="stat-card">
           <div class="stat-label">Rentabilidad YTD</div>
@@ -210,7 +210,6 @@
         </div>
       </div>
       
-      <!-- Grupo 3: Estadísticas -->
       <div class="stat-group">
         <div class="stat-card">
           <div class="stat-label">Win Rate</div>
@@ -223,7 +222,6 @@
       </div>
     </div>
 
-    <!-- Tabla Mensual y Gráfico -->
     <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem; margin-top: 1.5rem;">
       <div class="panel-card">
         <div class="panel-title" style="margin-bottom:1rem;">Desglose Mensual</div>
@@ -298,9 +296,7 @@
           <label class="form-label">P&L Final Realizado ($)</label>
           <input type="number" class="form-input" id="f-pnl" step="0.01">
         </div>
-        <div class="form-group">
-          <!-- Espacio vacío para mantener cuadricula visual -->
-        </div>
+        <div class="form-group"></div>
 
         <div class="form-group">
           <label class="form-label">Precio de Entrada</label>
@@ -342,7 +338,11 @@
 </div>
 
 <script>
-// Funciones de formateo numérico de estilo Español
+// --- CONEXIÓN DIRECTA A SUPABASE ---
+const SUPABASE_URL = 'https://zxgsxjxlkcrtqjitlzzc.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4Z3N4anhsa2NydHFqaXRsenpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzMTU1MjYsImV4cCI6MjEwNjg5MTUyNn0.iJnppCJY0TChsrN3BNzfSahb807B7gw6v7WY90w_qog';
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
 function fmt(num) {
   return parseFloat(num).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -351,8 +351,8 @@ function fmtPrice(num) {
   return parseFloat(num).toLocaleString('es-ES', { maximumFractionDigits: 5 });
 }
 
-let initialCapital = parseFloat(localStorage.getItem('tradelog_initial_cap')) || 50000;
-let trades = JSON.parse(localStorage.getItem('tradelog_trades') || '[]');
+let initialCapital = 50000;
+let trades = [];
 let computedTrades = [];
 let editingId = null;
 let currentImage = null;
@@ -363,11 +363,26 @@ let currentYear = calDate.getFullYear();
 const monthNames = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const fullMonthNames = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
   document.getElementById('currentDate').textContent = new Date().toLocaleDateString('es-ES', { weekday:'long', day:'numeric', month:'long' });
-  refreshApp();
+  await cargarDatosDeSupabase();
 });
+
+async function cargarDatosDeSupabase() {
+  const { data: setRes } = await db.from('tradelog_settings').select('value').eq('key', 'initial_capital').single();
+  if (setRes && setRes.value) {
+    initialCapital = parseFloat(setRes.value);
+  }
+
+  const { data: tradeRes, error } = await db.from('tradelog_trades').select('*');
+  if (error) {
+    console.error('Error al descargar trades:', error);
+  } else {
+    trades = tradeRes || [];
+  }
+  refreshApp();
+}
 
 function switchTab(tabId) {
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -376,380 +391,4 @@ function switchTab(tabId) {
   document.getElementById('btn-' + tabId).classList.add('active');
   
   if (tabId === 'calendar') renderCalendar();
-  if (tabId === 'stats') { updateStats(); renderChart(); }
-}
-
-function refreshApp() {
-  let running = initialCapital;
-  let chronoTrades = [...trades].sort((a,b) => new Date(a.date) - new Date(b.date));
-  
-  computedTrades = chronoTrades.map(t => {
-    const pnl = t.pnl !== '' && t.pnl !== null ? parseFloat(t.pnl) : 0;
-    const capAtTrade = running;
-    running += pnl;
-    return { ...t, runningCap: capAtTrade, finalCap: running };
-  });
-
-  updateSetupOptions();
-  renderTable();
-  if(document.getElementById('tab-stats').classList.contains('active')){ updateStats(); renderChart(); }
-  if(document.getElementById('tab-calendar').classList.contains('active')) renderCalendar();
-}
-
-function updateSetupOptions() {
-  const datalist = document.getElementById('setup-list');
-  const defaults = ["Rebote AVWAP", "Pullback EMA", "Rotura Momentum"];
-  const used = trades.map(t => t.setup).filter(s => s && s.trim() !== "");
-  const uniqueSetups = [...new Set([...defaults, ...used])].sort();
-  
-  datalist.innerHTML = uniqueSetups.map(s => `<option value="${s}">`).join('');
-}
-
-function renderTable() {
-  const tbody = document.getElementById('tradeTableBody');
-  const sorted = [...computedTrades].reverse(); 
-
-  if (!sorted.length) {
-    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding: 2rem; color:var(--text-muted)">Sin operaciones registradas.</td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = sorted.map(t => {
-    const pnl = t.pnl !== '' && t.pnl !== null ? parseFloat(t.pnl) : null;
-    const pnlText = pnl !== null ? `${pnl >= 0 ? '+' : '-'}$${fmt(Math.abs(pnl))}` : '—';
-    const badgeCls = t.direction === 'LONG' ? 'badge-long' : 'badge-short';
-    
-    // Cálculo de R mediante acción de precio
-    let rText = '—';
-    let rClass = '';
-    if (t.entry && t.stop && t.exit) {
-      const entry = parseFloat(t.entry);
-      const stop = parseFloat(t.stop);
-      const exit = parseFloat(t.exit);
-      const risk = Math.abs(entry - stop);
-      
-      if (risk > 0) {
-        let reward = t.direction === 'LONG' ? (exit - entry) : (entry - exit);
-        const rValue = reward / risk;
-        rText = `${rValue >= 0 ? '+' : ''}${fmt(rValue)} R`;
-        rClass = rValue >= 0 ? 'positive' : 'negative';
-      }
-    }
-
-    const chartBtn = t.image 
-      ? `<button class="thumb-btn" onclick="openLightbox('${t.id}')"><img src="${t.image}"></button>`
-      : `<span style="font-size:11px; opacity:0.5;">Sin img</span>`;
-
-    return `<tr>
-      <td class="cell-mono">${formatDate(t.date)}</td>
-      <td class="cell-symbol">${t.symbol}</td>
-      <td><span class="badge ${badgeCls}">${t.direction}</span></td>
-      <td><span class="tag-pill">${t.setup || '—'}</span></td>
-      <td class="cell-mono">${fmtPrice(t.entry)}</td>
-      <td class="cell-mono">${fmtPrice(t.stop)}</td>
-      <td class="cell-mono">${fmtPrice(t.exit)}</td>
-      <td class="cell-mono" style="color: var(--${rClass === 'positive' ? 'green' : (rClass === 'negative' ? 'red' : 'text-primary')})"><strong>${rText}</strong></td>
-      <td class="cell-mono" style="color: var(--${pnl >= 0 ? 'green' : 'red'})">${pnlText}</td>
-      <td>${chartBtn}</td>
-      <td>
-        <button class="action-btn" onclick="openEditModal(${t.id})" title="Editar">✏️</button>
-        <button class="action-btn" onclick="deleteTrade(${t.id})" title="Borrar">🗑️</button>
-      </td>
-    </tr>`;
-  }).join('');
-}
-
-function formatDate(d) {
-  if (!d) return '—';
-  const [y, m, day] = d.split('-');
-  return `${day}/${m}/${y.slice(2)}`;
-}
-
-function configurarCapital() {
-  const input = prompt("Introduce tu Capital Inicial Base (ej. 10100):", initialCapital);
-  if (input !== null && input.trim() !== '') {
-    // Convierte notación española a código (10.100,50 -> 10100.50) para evitar bugs
-    let parsed = input.replace(/\./g, '').replace(',', '.');
-    let val = parseFloat(parsed);
-    if (!isNaN(val) && val > 0) {
-      initialCapital = val;
-      localStorage.setItem('tradelog_initial_cap', initialCapital);
-      refreshApp();
-    } else {
-      alert("Por favor, introduce un número válido sin formato raro.");
-    }
-  }
-}
-
-function updateStats() {
-  const closed = computedTrades.filter(t => t.pnl !== '' && t.pnl !== null);
-  const currentCap = closed.length ? closed[closed.length - 1].finalCap : initialCapital;
-  
-  setEl('stat-initial-cap', `$${fmt(initialCapital)}`);
-  setEl('stat-current-cap', `$${fmt(currentCap)}`);
-
-  const dToday = new Date();
-  const cYear = dToday.getFullYear();
-  const cMonth = dToday.getMonth();
-  
-  let ytdPnl = 0;
-  let monthPnl = 0;
-  const monthlyData = {}; 
-
-  closed.forEach(t => {
-    const dt = new Date(t.date);
-    const p = parseFloat(t.pnl);
-    
-    // Cálculo YTD y Mensual
-    if (dt.getFullYear() === cYear) {
-      ytdPnl += p;
-      if (dt.getMonth() === cMonth) monthPnl += p;
-    }
-    
-    // Para la tabla mensual
-    const monthKey = `${dt.getFullYear()}-${String(dt.getMonth()).padStart(2, '0')}`;
-    if(!monthlyData[monthKey]) monthlyData[monthKey] = { pnl: 0, year: dt.getFullYear(), month: dt.getMonth() };
-    monthlyData[monthKey].pnl += p;
-  });
-
-  // Mostrar Rentabilidad YTD
-  const ytdPct = (ytdPnl / initialCapital) * 100;
-  setEl('stat-ytd-pct', `${ytdPct >= 0 ? '+' : ''}${fmt(ytdPct)}%`, ytdPct >= 0 ? 'positive' : 'negative');
-  document.getElementById('stat-ytd-sub').textContent = `Neto YTD: ${ytdPnl >= 0 ? '+' : '-'}$${fmt(Math.abs(ytdPnl))}`;
-
-  // Mostrar Rentabilidad del Mes Actual
-  const monthPct = (monthPnl / initialCapital) * 100;
-  setEl('stat-month-pct', `${monthPct >= 0 ? '+' : ''}${fmt(monthPct)}%`, monthPct >= 0 ? 'positive' : 'negative');
-  document.getElementById('stat-month-sub').textContent = `Neto mes: ${monthPnl >= 0 ? '+' : '-'}$${fmt(Math.abs(monthPnl))}`;
-
-  // Otras métricas
-  const wins = closed.filter(t => parseFloat(t.pnl) >= 0);
-  if (closed.length) {
-    const wr = (wins.length / closed.length * 100);
-    setEl('stat-winrate', `${fmt(wr)}%`, wr >= 50 ? 'positive' : 'negative');
-    
-    let streak = 0, type = '';
-    for (let i = closed.length - 1; i >= 0; i--) {
-      const isWin = parseFloat(closed[i].pnl) >= 0;
-      if (i === closed.length - 1) { streak = 1; type = isWin ? 'W' : 'L'; }
-      else if ((isWin && type === 'W') || (!isWin && type === 'L')) streak++;
-      else break;
-    }
-    setEl('stat-streak', `${streak} ${type}`, type === 'W' ? 'positive' : 'negative');
-  } else {
-    setEl('stat-winrate', '—');
-    setEl('stat-streak', '—');
-  }
-
-  // Renderizar Tabla Mensual (Dólares y Porcentaje)
-  const mTable = document.getElementById('monthlyTableBody');
-  const sortedMonths = Object.keys(monthlyData).sort().reverse();
-  
-  if(sortedMonths.length === 0) {
-    mTable.innerHTML = `<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">Sin datos</td></tr>`;
-  } else {
-    mTable.innerHTML = sortedMonths.map(key => {
-      const data = monthlyData[key];
-      const pnlUSD = data.pnl;
-      const pctRentabilidad = (pnlUSD / initialCapital) * 100; 
-      
-      const cls = pnlUSD >= 0 ? 'positive' : 'negative';
-      const prefix = pnlUSD >= 0 ? '+' : '';
-      
-      return `<tr>
-        <td><strong>${monthNames[data.month]} ${data.year}</strong></td>
-        <td class="cell-mono" style="color:var(--${cls === 'positive' ? 'green' : 'red'})">${prefix}$${fmt(Math.abs(pnlUSD))}</td>
-        <td class="cell-mono" style="color:var(--${cls === 'positive' ? 'green' : 'red'})">${prefix}${fmt(pctRentabilidad)}%</td>
-      </tr>`;
-    }).join('');
-  }
-}
-
-function setEl(id, val, cls) {
-  const el = document.getElementById(id);
-  el.textContent = val;
-  if(cls) el.className = `stat-value ${cls}`;
-}
-
-function changeMonth(dir) {
-  currentMonth += dir;
-  if (currentMonth < 0) { currentMonth = 11; currentYear--; }
-  if (currentMonth > 11) { currentMonth = 0; currentYear++; }
-  renderCalendar();
-}
-
-function renderCalendar() {
-  document.getElementById('calMonthLabel').textContent = `${fullMonthNames[currentMonth]} ${currentYear}`;
-  const grid = document.getElementById('calendarGrid');
-  grid.innerHTML = ['L','M','X','J','V','S','D'].map(d => `<div class="cal-header-day">${d}</div>`).join('');
-  
-  const firstDay = new Date(currentYear, currentMonth, 1).getDay();
-  const emptyDays = firstDay === 0 ? 6 : firstDay - 1; 
-  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-
-  for (let i = 0; i < emptyDays; i++) grid.innerHTML += `<div class="cal-day empty"></div>`;
-
-  for (let i = 1; i <= daysInMonth; i++) {
-    const dStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-    const dayTrades = computedTrades.filter(t => t.date === dStr && t.pnl !== '' && t.pnl !== null);
-    
-    if (dayTrades.length > 0) {
-      const dayPnl = dayTrades.reduce((sum, t) => sum + parseFloat(t.pnl), 0);
-      const cls = dayPnl > 0 ? 'win' : (dayPnl < 0 ? 'loss' : 'neutral');
-      const prefix = dayPnl > 0 ? '+' : '';
-      grid.innerHTML += `<div class="cal-day ${cls}">
-        <div class="cal-day-num">${i}</div>
-        <div class="cal-day-pnl">${prefix}$${fmt(Math.abs(dayPnl))}</div>
-      </div>`;
-    } else {
-      grid.innerHTML += `<div class="cal-day"><div class="cal-day-num">${i}</div></div>`;
-    }
-  }
-}
-
-function handleImageUpload(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    currentImage = ev.target.result;
-    document.getElementById('uploadPreview').src = currentImage;
-    document.getElementById('uploadPreview').style.display = 'block';
-    document.getElementById('uploadText').style.display = 'none';
-  };
-  reader.readAsDataURL(file);
-}
-
-function openLightbox(id) {
-  const t = trades.find(tr => tr.id == id);
-  if (t && t.image) {
-    document.getElementById('lightboxImg').src = t.image;
-    document.getElementById('lightbox').classList.add('open');
-  }
-}
-function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }
-
-function openAddModal() {
-  editingId = null;
-  currentImage = null;
-  document.getElementById('f-symbol').value = '';
-  document.getElementById('f-setup').value = '';
-  document.getElementById('f-pnl').value = '';
-  document.getElementById('f-entry').value = '';
-  document.getElementById('f-stop').value = '';
-  document.getElementById('f-exit').value = '';
-  document.getElementById('f-notes').value = '';
-  document.getElementById('uploadPreview').style.display = 'none';
-  document.getElementById('uploadText').style.display = 'block';
-  document.getElementById('addModal').classList.add('open');
-}
-
-function closeAddModal() { document.getElementById('addModal').classList.remove('open'); }
-function closeModalIfOverlay(e) { if (e.target.id === 'addModal') closeAddModal(); }
-
-function openEditModal(id) {
-  const t = trades.find(tr => tr.id === id);
-  if (!t) return;
-  editingId = id;
-  currentImage = t.image || null;
-  
-  document.getElementById('f-date').value = t.date;
-  document.getElementById('f-symbol').value = t.symbol;
-  document.getElementById('f-direction').value = t.direction;
-  document.getElementById('f-setup').value = t.setup || '';
-  document.getElementById('f-pnl').value = t.pnl;
-  document.getElementById('f-entry').value = t.entry || '';
-  document.getElementById('f-stop').value = t.stop || '';
-  document.getElementById('f-exit').value = t.exit || '';
-  document.getElementById('f-notes').value = t.notes || '';
-
-  if (currentImage) {
-    document.getElementById('uploadPreview').src = currentImage;
-    document.getElementById('uploadPreview').style.display = 'block';
-    document.getElementById('uploadText').style.display = 'none';
-  } else {
-    document.getElementById('uploadPreview').style.display = 'none';
-    document.getElementById('uploadText').style.display = 'block';
-  }
-  document.getElementById('addModal').classList.add('open');
-}
-
-function saveTrade() {
-  const data = {
-    date: document.getElementById('f-date').value,
-    symbol: document.getElementById('f-symbol').value.toUpperCase(),
-    direction: document.getElementById('f-direction').value,
-    setup: document.getElementById('f-setup').value.trim(),
-    pnl: document.getElementById('f-pnl').value,
-    entry: document.getElementById('f-entry').value,
-    stop: document.getElementById('f-stop').value,
-    exit: document.getElementById('f-exit').value,
-    notes: document.getElementById('f-notes').value,
-    image: currentImage
-  };
-
-  if (!data.symbol) { alert('El símbolo es obligatorio.'); return; }
-
-  if (editingId) {
-    const idx = trades.findIndex(t => t.id === editingId);
-    trades[idx] = { ...trades[idx], ...data };
-  } else {
-    trades.push({ id: Date.now(), ...data });
-  }
-
-  localStorage.setItem('tradelog_trades', JSON.stringify(trades));
-  refreshApp();
-  closeAddModal();
-}
-
-function deleteTrade(id) {
-  if (confirm('¿Seguro que quieres borrar este trade?')) {
-    trades = trades.filter(t => t.id !== id);
-    localStorage.setItem('tradelog_trades', JSON.stringify(trades));
-    refreshApp();
-  }
-}
-
-function renderChart() {
-  const canvas = document.getElementById('equityChart');
-  const ctx = canvas.getContext('2d');
-  const closed = computedTrades.filter(t => t.pnl !== '' && t.pnl !== null);
-  
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (closed.length < 1) return;
-
-  const W = canvas.offsetWidth; 
-  const H = 300; 
-  canvas.width = W; canvas.height = H;
-
-  const points = [initialCapital, ...closed.map(t => t.finalCap)];
-  const min = Math.min(...points); const max = Math.max(...points);
-  const range = (max - min) || 1;
-  const pd = 20, cw = W - (pd*2), ch = H - (pd*2);
-  const px = i => pd + (i / (points.length - 1)) * cw;
-  const py = v => pd + ch - ((v - min) / range) * ch;
-
-  const grad = ctx.createLinearGradient(0, 0, 0, H);
-  const isPositive = points[points.length-1] >= initialCapital;
-  grad.addColorStop(0, isPositive ? 'rgba(0,212,170,0.2)' : 'rgba(255,71,87,0.2)');
-  grad.addColorStop(1, 'rgba(0,0,0,0)');
-
-  ctx.beginPath();
-  ctx.moveTo(px(0), py(points[0]));
-  points.forEach((v, i) => i > 0 && ctx.lineTo(px(i), py(v)));
-  ctx.lineTo(px(points.length-1), H);
-  ctx.lineTo(px(0), H);
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.moveTo(px(0), py(points[0]));
-  points.forEach((v, i) => i > 0 && ctx.lineTo(px(i), py(v)));
-  ctx.strokeStyle = isPositive ? '#00D4AA' : '#FF4757';
-  ctx.lineWidth = 3; 
-  ctx.stroke();
-}
-window.addEventListener('resize', () => { if(document.getElementById('tab-stats').classList.contains('active')) renderChart(); });
-</script>
-</body>
-</html>
+  if (tabId === 'stats') { updateStats();
